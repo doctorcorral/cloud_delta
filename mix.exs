@@ -7,7 +7,7 @@ defmodule CloudDelta.MixProject do
       version: "0.1.0",
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
-      deps: [{:nx, "~> 0.5"}],
+      deps: deps(),
       description: "High-performance 2D point cloud compression library using delta encoding and Huffman compression.",
       source_url: "https://github.com/doctorcorral/clouddelta/",
       package: [
@@ -22,6 +22,13 @@ defmodule CloudDelta.MixProject do
     [
       extra_applications: [:logger],
       mod: {CloudDelta.Application, []}
+    ]
+  end
+
+  defp deps() do
+    [
+      {:nx, "~> 0.5"}
+      {:ex_doc, "~> 0.14", only: :dev, runtime: false}
     ]
   end
 
