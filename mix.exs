@@ -27,7 +27,7 @@ defmodule CloudDelta.MixProject do
 
   defp deps() do
     [
-      {:nx, "~> 0.5"}
+      {:nx, "~> 0.5"},
       {:ex_doc, "~> 0.14", only: :dev, runtime: false}
     ]
   end
