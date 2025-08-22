@@ -4,7 +4,7 @@ An Elixir library for compressing 2D point clouds using delta encoding.
 - Practical compression: 3.24-3.68:1 (n = 10,000) with hybrid binary I/O.
 - Supports patterns: :squared, :sin, :linear, :random.
 - Usage: `CloudDelta.compress({x, y})`.
-- Docs: [Paper](docs/cloud_delta_paper.pdf)
+- Docs: [Paper](doc/cloud_delta_paper.pdf)
 - Links: [GitHub](https://github.com/doctorcorral/cloud_delta/), [Hex.pm](https://hex.pm/packages/cloud_delta)
 - License: MIT - see LICENSE.
 - TODO: Full Huffman encoding.
