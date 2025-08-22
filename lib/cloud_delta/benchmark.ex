@@ -8,7 +8,7 @@ defmodule CloudDelta.Benchmark do
 
   alias CloudDelta
 
-    @doc """
+  @doc """
   Generate a synthetic 2D point cloud dataset with various patterns and noise.
 
   This function creates test data for benchmarking and validation purposes.
@@ -38,34 +38,39 @@ defmodule CloudDelta.Benchmark do
       {100}
   """
   def generate_dataset(n \\ 5, pattern \\ :squared) do
-    key = Nx.Random.key(42) # Seed for reproducibility
+    # Seed for reproducibility
+    key = Nx.Random.key(42)
     {x, new_key} = Nx.Random.uniform(key, 0.0, 2.0, shape: {n})
     {noise, _} = Nx.Random.normal(new_key, 0.0, 0.5, shape: {n})
 
-    y_base = case pattern do
-      :squared ->
-        Nx.pow(x, 2)
+    y_base =
+      case pattern do
+        :squared ->
+          Nx.pow(x, 2)
 
-      :sin ->
-        # y = sin(2πx) scaled to [0, 4] range to match squared pattern
-        x
-        |> Nx.multiply(2 * :math.pi())
-        |> Nx.sin()
-        |> Nx.add(1.0)  # Shift to [0, 2]
-        |> Nx.multiply(2.0)  # Scale to [0, 4]
+        :sin ->
+          # y = sin(2πx) scaled to [0, 4] range to match squared pattern
+          x
+          |> Nx.multiply(2 * :math.pi())
+          |> Nx.sin()
+          # Shift to [0, 2]
+          |> Nx.add(1.0)
+          # Scale to [0, 4]
+          |> Nx.multiply(2.0)
 
-      :linear ->
-        # y = 2x for simple linear relationship
-        Nx.multiply(x, 2.0)
+        :linear ->
+          # y = 2x for simple linear relationship
+          Nx.multiply(x, 2.0)
 
-      :random ->
-        # Completely random y values in [0, 4] range
-        {random_y, _} = Nx.Random.uniform(new_key, 0.0, 4.0, shape: {n})
-        random_y
+        :random ->
+          # Completely random y values in [0, 4] range
+          {random_y, _} = Nx.Random.uniform(new_key, 0.0, 4.0, shape: {n})
+          random_y
 
-      _ ->
-        raise ArgumentError, "Unknown pattern #{inspect(pattern)}. Supported: :squared, :sin, :linear, :random"
-    end
+        _ ->
+          raise ArgumentError,
+                "Unknown pattern #{inspect(pattern)}. Supported: :squared, :sin, :linear, :random"
+      end
 
     y = Nx.add(y_base, noise)
     {x, y}
@@ -97,7 +102,8 @@ defmodule CloudDelta.Benchmark do
   def verify_compression(n \\ 5, pattern \\ :squared) do
     # Generate dataset
     {x, y} = generate_dataset(n, pattern)
-    original_size = n * 2 * 32 # 32 bits per float
+    # 32 bits per float
+    original_size = n * 2 * 32
 
     {time, result} =
       :timer.tc(fn ->
@@ -107,7 +113,8 @@ defmodule CloudDelta.Benchmark do
         {x_deltas, y_deltas} = CloudDelta.compute_deltas(sorted_dataset)
         {total_bits, avg_bits} = CloudDelta.entropy_encode_deltas({x_deltas, y_deltas})
 
-        compressed_size = total_bits + n * 8 + 2 * 32 # Perms (8 bits/index), initials
+        # Perms (8 bits/index), initials
+        compressed_size = total_bits + n * 8 + 2 * 32
 
         ratio = original_size / compressed_size
         compression_percent = (1 - compressed_size / original_size) * 100
@@ -116,16 +123,22 @@ defmodule CloudDelta.Benchmark do
         reconstructed_x = Nx.take_along_axis(x_sorted, x_inverse_perm, axis: 0)
         reconstructed_y = Nx.take_along_axis(y_sorted, y_inverse_perm, axis: 0)
 
-        {ratio, compression_percent, avg_bits, {x, y}, {reconstructed_x, reconstructed_y}, compressed_size}
+        {ratio, compression_percent, avg_bits, {x, y}, {reconstructed_x, reconstructed_y},
+         compressed_size}
       end)
 
-    {ratio, compression_percent, avg_bits, {x, y}, {reconstructed_x, reconstructed_y}, compressed_size} = result
+    {ratio, compression_percent, avg_bits, {x, y}, {reconstructed_x, reconstructed_y},
+     compressed_size} = result
 
     IO.puts("=== COMPRESSION ANALYSIS (#{String.upcase(to_string(pattern))}) ===")
     IO.puts("Execution Time: #{time / 1000} ms")
     IO.puts("Original Size: #{original_size} bits")
     IO.puts("Compressed Size: #{compressed_size} bits")
-    IO.puts("Compression Ratio: #{Float.round(ratio, 2)}:1 (#{Float.round(compression_percent, 2)}% compression)")
+
+    IO.puts(
+      "Compression Ratio: #{Float.round(ratio, 2)}:1 (#{Float.round(compression_percent, 2)}% compression)"
+    )
+
     IO.puts("Average Bits per Delta: #{Float.round(avg_bits, 2)}")
 
     # Verify lossless reconstruction
@@ -146,21 +159,27 @@ defmodule CloudDelta.Benchmark do
   - `test_patterns` - List of patterns to test (default: [:squared, :sin, :linear, :random])
   - `test_sizes` - List of dataset sizes to test (default: [100, 1_000, 10_000])
   """
-  def run_benchmark_suite(test_patterns \\ [:squared, :sin, :linear, :random], test_sizes \\ [100, 1_000, 10_000]) do
+  def run_benchmark_suite(
+        test_patterns \\ [:squared, :sin, :linear, :random],
+        test_sizes \\ [100, 1_000, 10_000]
+      ) do
     IO.puts("=== POINT CLOUD COMPRESSION BENCHMARK SUITE ===\n")
 
-    all_results = for pattern <- test_patterns do
-      IO.puts("=== Testing Pattern: #{String.upcase(to_string(pattern))} ===")
+    all_results =
+      for pattern <- test_patterns do
+        IO.puts("=== Testing Pattern: #{String.upcase(to_string(pattern))} ===")
 
-      pattern_results = for n <- test_sizes do
-        IO.puts("Testing n=#{n} with #{pattern} pattern...")
-        {ratio, percent, avg_bits, lossless} = verify_compression(n, pattern)
-        IO.puts("")
-        {n, pattern, ratio, percent, avg_bits, lossless}
+        pattern_results =
+          for n <- test_sizes do
+            IO.puts("Testing n=#{n} with #{pattern} pattern...")
+            {ratio, percent, avg_bits, lossless} = verify_compression(n, pattern)
+            IO.puts("")
+            {n, pattern, ratio, percent, avg_bits, lossless}
+          end
+
+        pattern_results
       end
-
-      pattern_results
-    end |> List.flatten()
+      |> List.flatten()
 
     IO.puts("=== COMPREHENSIVE BENCHMARK SUMMARY ===")
     IO.puts("| Pattern  | Size     | Ratio   | Compression | Avg Bits | Lossless |")
@@ -174,7 +193,9 @@ defmodule CloudDelta.Benchmark do
       bits_str = String.pad_leading(Float.round(avg_bits, 2) |> to_string(), 8)
       lossless_str = String.pad_leading(to_string(lossless), 8)
 
-      IO.puts("| #{pattern_str} | #{n_str} | #{ratio_str} | #{percent_str}% | #{bits_str} | #{lossless_str} |")
+      IO.puts(
+        "| #{pattern_str} | #{n_str} | #{ratio_str} | #{percent_str}% | #{bits_str} | #{lossless_str} |"
+      )
     end
 
     all_results

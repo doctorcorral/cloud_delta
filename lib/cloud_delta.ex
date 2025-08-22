@@ -1,34 +1,34 @@
 defmodule CloudDelta do
   @moduledoc """
   High-performance 2D point cloud compression library using delta encoding and Huffman compression.
-  
+
   CloudDelta provides lossless compression for 2D point cloud data, achieving compression ratios
   of up to 8:1 on large datasets. The algorithm uses independent sorting, delta encoding, and
   Huffman compression to efficiently compress coordinate data while maintaining perfect reconstruction.
-  
+
   ## Key Features
-  
+
   - **Lossless compression**: Bit-identical reconstruction guaranteed
-  - **High performance**: Up to 8:1 compression ratio on large datasets  
+  - **High performance**: Up to 8:1 compression ratio on large datasets
   - **Scalable**: Performance improves with dataset size
   - **Pattern-agnostic**: Works well with linear, sinusoidal, random, and geometric data
   - **Simple API**: Just compress/uncompress functions
-  
+
   ## Usage
-  
+
       # Basic compression
       {x, y} = get_point_cloud_data()
       compressed = CloudDelta.compress({x, y})
       {x_restored, y_restored} = CloudDelta.uncompress(compressed)
-      
+
       # Verify lossless reconstruction
       is_perfect = CloudDelta.check_compression({x, y})
-  
+
   ## Performance
-  
+
   Compression ratios by dataset size:
   - n=1,000: ~2.2:1 (54% compression)
-  - n=10,000: ~3.5:1 (71% compression) 
+  - n=10,000: ~3.5:1 (71% compression)
   - n=100,000: ~6.3:1 (84% compression)
   - n=1,000,000: ~7.8:1 (87% compression)
   """
@@ -72,23 +72,26 @@ defmodule CloudDelta do
   """
   def uncompress(binary) do
     <<x0::float-32, y0::float-32, n::integer-32, rest::binary>> = binary
-    perm_size = n # 1 byte per permutation index
-    <<x_perm_binary::binary-size(perm_size), y_perm_binary::binary-size(perm_size), delta_length::integer-32, delta_binary::binary-size(delta_length)>> = rest
+    # 1 byte per permutation index
+    perm_size = n
+
+    <<x_perm_binary::binary-size(perm_size), y_perm_binary::binary-size(perm_size),
+      delta_length::integer-32, delta_binary::binary-size(delta_length)>> = rest
 
     # Reconstruct inverse permutations
     x_inv_perm = N.from_binary(x_perm_binary, :u8) |> N.reshape({n})
     y_inv_perm = N.from_binary(y_perm_binary, :u8) |> N.reshape({n})
 
     # Parse tree and decode deltas
-    <<tree_size::integer-32, tree_binary::binary-size(tree_size), original_bit_count::integer-32, bitstream_bytes::integer-32, encoded_bits::binary-size(bitstream_bytes)>> = delta_binary
+    <<tree_size::integer-32, tree_binary::binary-size(tree_size), original_bit_count::integer-32,
+      bitstream_bytes::integer-32, encoded_bits::binary-size(bitstream_bytes)>> = delta_binary
 
     # Extract only the original bits (without padding)
     <<useful_bits::bitstring-size(original_bit_count), _padding::bitstring>> = encoded_bits
     decoded_deltas = decode_deltas(tree_binary, useful_bits, n)
 
     # Split deltas back to x and y (first n are x_deltas, rest are y_deltas)
-    delta_list = if is_list(decoded_deltas), do: decoded_deltas, else: N.to_flat_list(decoded_deltas)
-    {x_deltas, y_deltas} = Enum.split(delta_list, n)
+    {x_deltas, y_deltas} = Enum.split(decoded_deltas, n)
 
     # Reconstruct sorted arrays using cumulative sum
     x_sorted = reconstruct_from_deltas(N.tensor([x0]), x_deltas)
@@ -101,7 +104,7 @@ defmodule CloudDelta do
     {x_reconstructed, y_reconstructed}
   end
 
-    @doc """
+  @doc """
   Verifies lossless compression - checks bit-identical reconstruction.
   """
   def check_compression({x, y}) do
@@ -164,7 +167,8 @@ defmodule CloudDelta do
     bit_lengths =
       for {value, _} <- freq_map do
         case Map.get(codes, value) do
-          nil -> 1 # Fallback for unassigned codes
+          # Fallback for unassigned codes
+          nil -> 1
           code -> String.length(code)
         end
       end
@@ -176,10 +180,13 @@ defmodule CloudDelta do
 
   defp build_huffman_tree(q) do
     case :queue.len(q) do
-      0 -> nil
+      0 ->
+        nil
+
       1 ->
         {{:value, node}, _} = :queue.out(q)
         node
+
       _ ->
         # Sort queue by frequency and build tree
         sorted_nodes = :queue.to_list(q) |> Enum.sort_by(fn {freq, _} -> freq end)
@@ -188,6 +195,7 @@ defmodule CloudDelta do
   end
 
   defp build_tree_from_sorted([node]), do: node
+
   defp build_tree_from_sorted([node1, node2 | rest]) do
     {freq1, _} = node1
     {freq2, _} = node2
@@ -197,6 +205,7 @@ defmodule CloudDelta do
   end
 
   defp assign_codes(nil, codes, _), do: codes
+
   defp assign_codes({_freq, {:internal, left, right}}, codes, prefix) do
     if String.length(prefix) > 100 do
       raise "Infinite recursion detected in assign_codes"
@@ -205,6 +214,7 @@ defmodule CloudDelta do
       assign_codes(right, codes, prefix <> "1")
     end
   end
+
   defp assign_codes({_freq, val}, codes, prefix) do
     Map.put(codes, val, prefix)
   end
@@ -231,16 +241,21 @@ defmodule CloudDelta do
     # Combine tree and encoded bits
     tree_size = byte_size(tree_binary)
     bitstream_bytes = byte_size(padded_bitstream)
-    <<tree_size::integer-32, tree_binary::binary, original_bit_count::integer-32, bitstream_bytes::integer-32, padded_bitstream::binary>>
+
+    <<tree_size::integer-32, tree_binary::binary, original_bit_count::integer-32,
+      bitstream_bytes::integer-32, padded_bitstream::binary>>
   end
 
   # Serialize Huffman tree for storage
-  defp serialize_huffman_tree(nil), do: <<0::8>> # Empty marker
+  # Empty marker
+  defp serialize_huffman_tree(nil), do: <<0::8>>
+
   defp serialize_huffman_tree({freq, {:internal, left, right}}) do
     left_bin = serialize_huffman_tree(left)
     right_bin = serialize_huffman_tree(right)
     <<1::8, freq::integer-32, left_bin::binary, right_bin::binary>>
   end
+
   defp serialize_huffman_tree({freq, val}) do
     <<2::8, freq::integer-32, val::float-32>>
   end
@@ -249,7 +264,7 @@ defmodule CloudDelta do
   defp encode_to_bitstream(deltas, codes) do
     Enum.reduce(deltas, <<>>, fn delta, acc ->
       code = Map.get(codes, delta, "1")
-      code_bits = for <<bit_char <- code>>, into: <<>>, do: <<(bit_char - ?0)::1>>
+      code_bits = for <<bit_char <- code>>, into: <<>>, do: <<bit_char - ?0::1>>
       <<acc::bitstring, code_bits::bitstring>>
     end)
   end
@@ -260,7 +275,7 @@ defmodule CloudDelta do
     <<bitstream::bitstring, 0::size(padding_bits)>>
   end
 
-    # Decode deltas from binary (real implementation)
+  # Decode deltas from binary (real implementation)
   defp decode_deltas(tree_binary, delta_binary, n) do
     # Deserialize the Huffman tree
     {tree, _rest} = deserialize_huffman_tree(tree_binary)
@@ -271,18 +286,21 @@ defmodule CloudDelta do
 
   # Deserialize Huffman tree from binary
   defp deserialize_huffman_tree(<<0::8, rest::binary>>), do: {nil, rest}
+
   defp deserialize_huffman_tree(<<1::8, freq::integer-32, rest::binary>>) do
     {left, rest1} = deserialize_huffman_tree(rest)
     {right, rest2} = deserialize_huffman_tree(rest1)
     {{freq, {:internal, left, right}}, rest2}
   end
+
   defp deserialize_huffman_tree(<<2::8, freq::integer-32, val::float-32, rest::binary>>) do
     {{freq, val}, rest}
   end
 
   # Decode bitstream using Huffman tree
   defp decode_bitstream(bitstream, tree, n) do
-    total_deltas_needed = 2 * n  # All deltas combined from both x and y
+    # All deltas combined from both x and y
+    total_deltas_needed = 2 * n
     {deltas, _} = decode_bits(bitstream, tree, tree, [], total_deltas_needed, 0)
 
     # Fallback: if we don't get enough deltas, pad with zeros
@@ -295,12 +313,15 @@ defmodule CloudDelta do
   end
 
   # Simplified decode_bits - focus on correctness
-  defp decode_bits(bitstream, root, _current, acc, needed, bit_pos) when length(acc) >= needed do
+  defp decode_bits(_bitstream, _root, _current, acc, needed, bit_pos)
+       when length(acc) >= needed do
     {Enum.reverse(acc), bit_pos}
   end
+
   defp decode_bits(<<>>, _root, _current, acc, _needed, bit_pos) do
     {Enum.reverse(acc), bit_pos}
   end
+
   defp decode_bits(bitstream, root, current, acc, needed, bit_pos) do
     case bitstream do
       <<bit::1, rest::bitstring>> ->
@@ -309,17 +330,22 @@ defmodule CloudDelta do
             # Found leaf - add value and restart from root
             new_acc = [value | acc]
             decode_bits(rest, root, root, new_acc, needed, bit_pos + 1)
+
           {:continue, new_current} ->
             # Continue traversing down the tree
             decode_bits(rest, root, new_current, acc, needed, bit_pos + 1)
         end
+
       <<>> ->
         {Enum.reverse(acc), bit_pos}
     end
   end
 
   # Tree traversal helper
-  defp traverse_tree({_freq, val}, _bit) when not is_tuple(val) or (is_tuple(val) and elem(val, 0) != :internal), do: {:leaf, val}
+  defp traverse_tree({_freq, val}, _bit)
+       when not is_tuple(val) or (is_tuple(val) and elem(val, 0) != :internal),
+       do: {:leaf, val}
+
   defp traverse_tree({_freq, {:internal, left, _right}}, 0), do: {:continue, left}
   defp traverse_tree({_freq, {:internal, _left, right}}, 1), do: {:continue, right}
 

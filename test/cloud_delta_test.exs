@@ -19,13 +19,15 @@ defmodule CloudDeltaTest do
     assert Nx.size(y_restored) == n
 
     # Verify compression actually achieves reduction
-    original_size = n * 2 * 4 # 4 bytes per float32
+    # 4 bytes per float32
+    original_size = n * 2 * 4
     compressed_size = byte_size(compressed)
     compression_ratio = original_size / compressed_size
 
     # Note: Binary compression may have negative ratio due to Huffman tree serialization overhead
     # But the pipeline should work without crashing
-    assert compression_ratio > 0.0 # Should produce valid binary
+    # Should produce valid binary
+    assert compression_ratio > 0.0
   end
 
   test "small dataset compression roundtrip" do
@@ -53,31 +55,43 @@ defmodule CloudDeltaTest do
   test "theoretical compression performance (like reference implementation)" do
     # Test theoretical compression using same method as reference
     n = 1000
-    {ratio, compression_percent, avg_bits, is_lossless} = CloudDelta.Benchmark.verify_compression(n)
+
+    {ratio, compression_percent, avg_bits, is_lossless} =
+      CloudDelta.Benchmark.verify_compression(n)
 
     # Verify compression performance matches our benchmarks
-    assert compression_percent > 50.0 # Should achieve at least 50% compression
-    assert ratio > 2.0 # Should be at least 2:1 ratio
-    assert avg_bits < 15.0 # Average bits per delta should be reasonable
-    assert is_lossless == true # Should be perfectly lossless
+    # Should achieve at least 50% compression
+    assert compression_percent > 50.0
+    # Should be at least 2:1 ratio
+    assert ratio > 2.0
+    # Average bits per delta should be reasonable
+    assert avg_bits < 15.0
+    # Should be perfectly lossless
+    assert is_lossless == true
   end
 
   test "large dataset compression achieves target ratio" do
     # Test that large datasets approach the 7.96:1 target
-    n = 100_000 # Use 100k for faster testing (vs 1M)
-    {ratio, compression_percent, _avg_bits, is_lossless} = CloudDelta.Benchmark.verify_compression(n)
+    # Use 100k for faster testing (vs 1M)
+    n = 100_000
+
+    {ratio, compression_percent, _avg_bits, is_lossless} =
+      CloudDelta.Benchmark.verify_compression(n)
 
     # Should approach target performance for large datasets
-    assert compression_percent > 80.0 # Should achieve over 80% compression
-    assert ratio > 5.0 # Should be at least 5:1 ratio
-    assert is_lossless == true # Should be perfectly lossless
+    # Should achieve over 80% compression
+    assert compression_percent > 80.0
+    # Should be at least 5:1 ratio
+    assert ratio > 5.0
+    # Should be perfectly lossless
+    assert is_lossless == true
   end
 
   test "check_compression function validates round-trip" do
     # Test the public API check_compression function
     n = 50
-        {x, y} = CloudDelta.Benchmark.generate_dataset(n)
-    
+    {x, y} = CloudDelta.Benchmark.generate_dataset(n)
+
     # This tests the actual binary compress/uncompress pipeline
     # Note: May not be lossless due to current Huffman decoding issues
     result = CloudDelta.check_compression({x, y})
