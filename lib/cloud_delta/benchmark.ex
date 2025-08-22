@@ -1,7 +1,7 @@
 defmodule CloudDelta.Benchmark do
   @moduledoc """
   Benchmarking and performance analysis utilities for CloudDelta.
-  
+
   This module provides functions to test compression performance, measure ratios,
   and validate lossless reconstruction. Not part of the core compression API.
   """
@@ -32,9 +32,9 @@ defmodule CloudDelta.Benchmark do
             iex> {x, y} = CloudDelta.Benchmark.generate_dataset(100, :squared)
       iex> Nx.shape(x)
       {100}
-      
+
       iex> {x, y} = CloudDelta.Benchmark.generate_dataset(100, :sin)
-      iex> Nx.shape(y) 
+      iex> Nx.shape(y)
       {100}
   """
   def generate_dataset(n \\ 5, pattern \\ :squared) do

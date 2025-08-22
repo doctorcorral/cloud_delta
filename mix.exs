@@ -9,15 +9,15 @@ defmodule CloudDelta.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: "High-performance 2D point cloud compression library using delta encoding and Huffman compression.",
-      source_url: "https://github.com/doctorcorral/clouddelta/",
+      source_url: "https://github.com/doctorcorral/cloud_delta/",
       package: [
+        maintainers: ["Ricardo Corral-Corral"],
         licenses: ["MIT"],
-        links: %{"GitHub" => "https://github.com/doctorcorral/clouddelta/"}
+        links: %{"GitHub" => "https://github.com/doctorcorral/cloud_delta/"}
       ]
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
   def application do
     [
       extra_applications: [:logger],
