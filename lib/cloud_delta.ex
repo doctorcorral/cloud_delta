@@ -16,9 +16,13 @@ defmodule CloudDelta do
 
   ## Usage
 
-      # Basic compression
+      # Basic compression (default Huffman)
       {x, y} = get_point_cloud_data()
       compressed = CloudDelta.compress({x, y})
+      {x_restored, y_restored} = CloudDelta.uncompress(compressed)
+
+      # Hybrid mode (raw binary deltas)
+      compressed = CloudDelta.compress({x, y}, method: :hybrid)
       {x_restored, y_restored} = CloudDelta.uncompress(compressed)
 
       # Verify lossless reconstruction
@@ -36,14 +40,28 @@ defmodule CloudDelta do
 
   @doc """
   Compresses a point cloud {x, y} into a binary.
+
+  ## Options
+
+  - `:method` - Compression method to use:
+    - `:hybrid` - Raw binary float deltas (fast, larger size)
+    - `:huffman` - Huffman encoded deltas (slower, better compression) [default]
+
+  ## Examples
+
+      # Default Huffman compression
+      compressed = CloudDelta.compress({x, y})
+
+      # Hybrid mode (raw binary deltas)
+      compressed = CloudDelta.compress({x, y}, method: :hybrid)
   """
-  def compress({x, y}) when is_tuple({x, y}) do
+  def compress({x, y}, opts \\ []) when is_tuple({x, y}) do
+    method = Keyword.get(opts, :method, :huffman)
+
     case N.to_number(x[0]) do
       num when is_number(num) ->
         {{x_sorted, y_sorted}, {x_inv_perm, y_inv_perm}} = sort_independently({x, y})
         {x_deltas, y_deltas} = compute_deltas({x_sorted, y_sorted})
-        # Huffman encode deltas to actual binary
-        delta_binary = encode_deltas_to_binary({x_deltas, y_deltas})
 
         n = N.size(x)
         initial = <<N.to_number(x_sorted[0])::float-32, N.to_number(y_sorted[0])::float-32>>
@@ -56,9 +74,22 @@ defmodule CloudDelta do
 
         perms = <<n::integer-32>> <> x_perm_binary <> y_perm_binary
 
-        # Store actual encoded deltas with length prefix
-        delta_length = byte_size(delta_binary)
-        delta_section = <<delta_length::integer-32, delta_binary::binary>>
+        # Encode deltas based on method
+        {method_header, delta_binary} = case method do
+          :hybrid ->
+            # Raw binary float deltas (4 bytes per delta)
+            delta_bin = encode_deltas_to_hybrid_binary({x_deltas, y_deltas})
+            {<<0::8>>, delta_bin}  # Method flag: 0 = hybrid
+
+          :huffman ->
+            # Huffman encoded deltas with tree
+            delta_bin = encode_deltas_to_binary({x_deltas, y_deltas})
+            {<<1::8>>, delta_bin}  # Method flag: 1 = huffman
+        end
+
+        # Store encoded deltas with method flag and length prefix
+        delta_length = byte_size(method_header) + byte_size(delta_binary)
+        delta_section = <<delta_length::integer-32, method_header::binary, delta_binary::binary>>
 
         initial <> perms <> delta_section
 
@@ -76,19 +107,27 @@ defmodule CloudDelta do
     perm_size = n
 
     <<x_perm_binary::binary-size(perm_size), y_perm_binary::binary-size(perm_size),
-      delta_length::integer-32, delta_binary::binary-size(delta_length)>> = rest
+      delta_length::integer-32, method_and_delta_binary::binary-size(delta_length)>> = rest
 
     # Reconstruct inverse permutations
     x_inv_perm = N.from_binary(x_perm_binary, :u8) |> N.reshape({n})
     y_inv_perm = N.from_binary(y_perm_binary, :u8) |> N.reshape({n})
 
-    # Parse tree and decode deltas
-    <<tree_size::integer-32, tree_binary::binary-size(tree_size), original_bit_count::integer-32,
-      bitstream_bytes::integer-32, encoded_bits::binary-size(bitstream_bytes)>> = delta_binary
+    # Extract method flag and decode deltas accordingly
+    <<method_flag::8, delta_binary::binary>> = method_and_delta_binary
 
-    # Extract only the original bits (without padding)
-    <<useful_bits::bitstring-size(original_bit_count), _padding::bitstring>> = encoded_bits
-    decoded_deltas = decode_deltas(tree_binary, useful_bits, n)
+    decoded_deltas = case method_flag do
+      0 -> # Hybrid method: raw binary floats
+        decode_hybrid_deltas(delta_binary, n)
+
+      1 -> # Huffman method: tree + bitstream
+        <<tree_size::integer-32, tree_binary::binary-size(tree_size), original_bit_count::integer-32,
+          bitstream_bytes::integer-32, encoded_bits::binary-size(bitstream_bytes)>> = delta_binary
+
+        # Extract only the original bits (without padding)
+        <<useful_bits::bitstring-size(original_bit_count), _padding::bitstring>> = encoded_bits
+        decode_deltas(tree_binary, useful_bits, n)
+    end
 
     # Split deltas back to x and y (first n are x_deltas, rest are y_deltas)
     {x_deltas, y_deltas} = Enum.split(decoded_deltas, n)
@@ -107,8 +146,8 @@ defmodule CloudDelta do
   @doc """
   Verifies lossless compression - checks bit-identical reconstruction.
   """
-  def check_compression({x, y}) do
-    compressed = compress({x, y})
+  def check_compression({x, y}, opts \\ []) do
+    compressed = compress({x, y}, opts)
     {x_uncompressed, y_uncompressed} = uncompress(compressed)
 
     # Check bit-identical reconstruction using Nx.all and Nx.equal
@@ -275,6 +314,24 @@ defmodule CloudDelta do
     <<bitstream::bitstring, 0::size(padding_bits)>>
   end
 
+  # Hybrid encoding: store deltas as raw binary floats (4 bytes each)
+  defp encode_deltas_to_hybrid_binary({x_deltas, y_deltas}) do
+    all_deltas = N.concatenate([x_deltas, y_deltas]) |> N.to_flat_list()
+    # Convert each delta to 32-bit float binary
+    for delta <- all_deltas, into: <<>>, do: <<delta::float-32>>
+  end
+
+  # Decode hybrid deltas from raw binary floats
+  defp decode_hybrid_deltas(delta_binary, n) do
+    # Each delta is 4 bytes (float-32), total deltas = 2*n
+    total_deltas = 2 * n
+    delta_size = total_deltas * 4
+    <<deltas_binary::binary-size(delta_size)>> = delta_binary
+    # Parse each 4-byte chunk as float-32
+    deltas = for <<delta::float-32 <- deltas_binary>>, do: delta
+    deltas
+  end
+
   # Decode deltas from binary (real implementation)
   defp decode_deltas(tree_binary, delta_binary, n) do
     # Deserialize the Huffman tree
@@ -350,14 +407,11 @@ defmodule CloudDelta do
   defp traverse_tree({_freq, {:internal, _left, right}}, 1), do: {:continue, right}
 
   # Reconstruct from deltas using cumulative sum
-  defp reconstruct_from_deltas(initial, deltas) do
-    N.concatenate([initial, N.tensor(deltas)])
-    |> then(fn combined ->
-      # Manual cumulative sum - scan preserves the first element and accumulates from there
-      combined_list = N.to_flat_list(combined)
-      cumsum_list = Enum.scan(combined_list, &+/2)
-      # scan returns one less element, so we need to prepend the first element
-      [hd(combined_list) | cumsum_list] |> N.tensor()
-    end)
+  defp reconstruct_from_deltas(_initial, deltas) do
+    # Deltas already include the first element, so just compute cumulative sum
+    delta_list = if is_list(deltas), do: deltas, else: N.to_flat_list(deltas)
+    cumsum_list = Enum.scan(delta_list, &+/2)
+    # Enum.scan gives us the cumulative sum directly
+    cumsum_list |> N.tensor()
   end
 end
