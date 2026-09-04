@@ -127,6 +127,28 @@ defmodule CloudDeltaTest do
     end
   end
 
+  test "loads a KITTI velodyne frame" do
+    path = "priv/datasets/lidar/KITTI_Tiny/Kitti/predict/scans/000000.bin"
+
+    if File.exists?(path) do
+      points = CloudDelta.Lidar.load_kitti_bin(path)
+      assert length(points) == 125_635
+      {x, y, z} = hd(points)
+      assert is_float(x) and is_float(y) and is_float(z)
+    end
+  end
+
+  test "loads Autzen LAS through laspy" do
+    path = "priv/datasets/lidar/autzen_trim.las"
+
+    if File.exists?(path) and CloudDelta.Lidar.laspy_available?() do
+      points = CloudDelta.Lidar.load_las(path)
+      assert length(points) == 110_000
+      {x, y, z} = hd(points)
+      assert is_float(x) and is_float(y) and is_float(z)
+    end
+  end
+
   test "stats compare against real byte counts, not theoretical bit sums" do
     {x, y} = CloudDelta.Benchmark.generate_dataset(200, :linear)
     stats = CloudDelta.stats({x, y}, mode: :quantized, bits: 16)

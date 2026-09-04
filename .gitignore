@@ -18,9 +18,13 @@ erl_crash.dump
 
 # Ignore package tarball (built via "mix hex.build").
 point_cloud_compression-*.tar
+cloud_delta-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
 
-# Downloaded benchmark clouds (Stanford PLYs, etc).
+# Downloaded benchmark clouds (Stanford PLYs, LiDAR, etc).
 /priv/datasets/
+
+# Local tool builds (TMC13 / G-PCC, Python venv for laspy).
+/.tools/

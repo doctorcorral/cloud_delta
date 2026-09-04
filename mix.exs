@@ -10,11 +10,16 @@ defmodule CloudDelta.MixProject do
       deps: deps(),
       description:
         "2D/3D point-cloud compression: Morton reorder, optional quantization, delta encoding, zlib.",
-      source_url: "https://github.com/doctorcorral/cloud_delta/",
+      source_url: "https://github.com/doctorcorral/cloud_delta",
+      docs: [
+        main: "readme",
+        extras: ["README.md"]
+      ],
       package: [
         maintainers: ["Ricardo Corral-Corral"],
         licenses: ["MIT"],
-        links: %{"GitHub" => "https://github.com/doctorcorral/cloud_delta/"}
+        links: %{"GitHub" => "https://github.com/doctorcorral/cloud_delta"},
+        files: ~w(lib scripts/laz_codec.py mix.exs README.md LICENSE)
       ]
     ]
   end
