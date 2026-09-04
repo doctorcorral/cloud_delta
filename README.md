@@ -71,39 +71,38 @@ on any of these sets, and it loses badly to Draco on LiDAR at 8-bit (KITTI
 dense reconstructions. The method is in the same conversation as the
 standards — a different, simpler pipeline — not a replacement for them.
 
-Encode time, 12-bit, median of 3 wall-clock runs (Apple M-series, 4 Sep
-2026). CloudDelta time is `compress/2` (quantize + Morton + zlib). Draco
-and G-PCC times are the encoder process after the input file is written.
-LAZ time is `laspy` write/compress only (no Python startup).
+Encode time, 12-bit, median of 5 wall-clock runs (Apple M-series, 4 Sep
+2026). CloudDelta is `compress/2` after an Elixir-only hot-path rewrite
+(tuples, one-pass bbox, `:lists.sort`, no NIF). The CD2 bitstream is
+unchanged. Draco and G-PCC times are the encoder process after the input
+file is written. LAZ time is `laspy` write/compress only.
 
 | Dataset | n | CloudDelta | Draco | LAZ | G-PCC | CD / Draco | CD / G-PCC |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| bun000 | 40,256 | 40 ms | **11 ms** | 3.6 ms | 42 ms | 3.8× | 0.96× |
-| zipper | 35,947 | 36 ms | **11 ms** | 4.2 ms | 44 ms | 3.4× | 0.83× |
-| armadillo | 172,974 | 258 ms | **46 ms** | 9.1 ms | 158 ms | 5.6× | 1.6× |
-| KITTI | 125,635 | 193 ms | **30 ms** | 8.3 ms | 84 ms | 6.4× | 2.3× |
-| Autzen | 110,000 | 177 ms | **26 ms** | 6.4 ms | 100 ms | 6.8× | 1.8× |
+| bun000 | 40,256 | 18 ms | **11 ms** | 3.6 ms | 42 ms | 1.6× | **0.43×** |
+| zipper | 35,947 | 18 ms | **11 ms** | 4.2 ms | 44 ms | 1.6× | **0.41×** |
+| armadillo | 172,974 | 100 ms | **46 ms** | 9.1 ms | 158 ms | 2.2× | **0.63×** |
+| KITTI | 125,635 | 94 ms | **30 ms** | 8.3 ms | 84 ms | 3.1× | 1.1× |
+| Autzen | 110,000 | 97 ms | **26 ms** | 6.4 ms | 100 ms | 3.7× | **0.97×** |
 
-Elixir vs C++ is most of the Draco gap. Against the G-PCC reference encoder
-the gap is small on the Stanford scans and about 2× on LiDAR. LAZ is in
-another speed class. Lossless CloudDelta is 2–5× slower than zlib and
-~10–20× slower than zstd; that is the cost of the spatial pass.
+CloudDelta encode is now faster than the G-PCC reference on the Stanford
+scans and Autzen, and about even on KITTI. Draco is still 1.6–3.7× ahead
+(C++). LAZ is in another speed class.
 
-Decode time, 12-bit, same method (`uncompress_points/1`, `draco_decoder`,
-laspy read, `tmc3 --mode=1`):
+Decode time, 12-bit, same CloudDelta build (`uncompress_points/1`). Draco /
+LAZ / G-PCC decode times are from the earlier tool pass:
 
 | Dataset | CloudDelta | Draco | LAZ | G-PCC | CD / Draco | CD / G-PCC |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| bun000 | 15 ms | **5.5 ms** | 4.5 ms | 51 ms | 2.8× | **0.30×** |
-| zipper | 14 ms | **4.8 ms** | 5.7 ms | 50 ms | 2.8× | **0.28×** |
-| armadillo | 84 ms | **14 ms** | 9.7 ms | 201 ms | 6.2× | **0.42×** |
-| KITTI | 64 ms | **10 ms** | 7.3 ms | 131 ms | 6.2× | **0.49×** |
-| Autzen | 61 ms | **8.8 ms** | 7.0 ms | 127 ms | 7.0× | **0.48×** |
+| bun000 | 8.4 ms | **5.5 ms** | 4.5 ms | 51 ms | 1.5× | **0.16×** |
+| zipper | 15 ms | **4.8 ms** | 5.7 ms | 50 ms | 3.1× | **0.30×** |
+| armadillo | 62 ms | **14 ms** | 9.7 ms | 201 ms | 4.4× | **0.31×** |
+| KITTI | 30 ms | **10 ms** | 7.3 ms | 131 ms | 3.0× | **0.23×** |
+| Autzen | 64 ms | **8.8 ms** | 7.0 ms | 127 ms | 7.3× | **0.51×** |
 
-Decode is CloudDelta’s better number: about 3× faster than its own encode,
-and **2–3.5× faster than G-PCC decode** on every set. Still 3–7× behind
-Draco, and LAZ remains the speed class of its own. Encode pays the Morton
-sort; decode is zlib inflate plus a prefix-sum walk.
+Decode stays CloudDelta’s better number against G-PCC (2–6× faster). Still
+behind Draco and LAZ. Encode pays the Morton sort; decode is zlib inflate
+plus a prefix-sum walk.
 
 ## Usage
 

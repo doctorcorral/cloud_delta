@@ -112,12 +112,33 @@ defmodule CloudDelta do
 
   @doc false
   def to_points(%Nx.Tensor{} = x, %Nx.Tensor{} = y) do
-    Enum.zip(Nx.to_flat_list(x), Nx.to_flat_list(y))
+    zip_f32(tensor_f32_bin(x), tensor_f32_bin(y), [])
   end
 
   @doc false
   def to_points(%Nx.Tensor{} = x, %Nx.Tensor{} = y, %Nx.Tensor{} = z) do
-    Enum.zip([Nx.to_flat_list(x), Nx.to_flat_list(y), Nx.to_flat_list(z)])
+    zip_f32(tensor_f32_bin(x), tensor_f32_bin(y), tensor_f32_bin(z), [])
+  end
+
+  defp tensor_f32_bin(%Nx.Tensor{} = t) do
+    t |> Nx.flatten() |> Nx.as_type(:f32) |> Nx.to_binary()
+  end
+
+  defp zip_f32(<<>>, <<>>, acc), do: :lists.reverse(acc)
+
+  defp zip_f32(<<x::float-32-native, xr::binary>>, <<y::float-32-native, yr::binary>>, acc) do
+    zip_f32(xr, yr, [{x, y} | acc])
+  end
+
+  defp zip_f32(<<>>, <<>>, <<>>, acc), do: :lists.reverse(acc)
+
+  defp zip_f32(
+         <<x::float-32-native, xr::binary>>,
+         <<y::float-32-native, yr::binary>>,
+         <<z::float-32-native, zr::binary>>,
+         acc
+       ) do
+    zip_f32(xr, yr, zr, [{x, y, z} | acc])
   end
 
   defp normalize_points({x, y, z}), do: to_points(x, y, z)
