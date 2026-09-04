@@ -144,7 +144,7 @@ G-PCC needs `tmc3` from MPEG TMC13 (`TMC3` or `.tools/tmc13/build/tmc3/tmc3`).
 ```elixir
 def deps do
   [
-    {:cloud_delta, "~> 0.2.0"}
+    {:cloud_delta, "~> 0.2.1"}
   ]
 end
 ```
