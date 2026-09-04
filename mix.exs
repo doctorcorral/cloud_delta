@@ -4,12 +4,12 @@ defmodule CloudDelta.MixProject do
   def project do
     [
       app: :cloud_delta,
-      version: "0.1.0",
+      version: "0.2.0",
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description:
-        "High-performance 2D point cloud compression library using delta encoding and Huffman compression.",
+        "2D point-cloud compression: Morton reorder, optional quantization, delta encoding, zlib.",
       source_url: "https://github.com/doctorcorral/cloud_delta/",
       package: [
         maintainers: ["Ricardo Corral-Corral"],

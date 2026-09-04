@@ -1,102 +1,87 @@
 defmodule CloudDeltaTest do
   use ExUnit.Case
-  doctest CloudDelta
 
-  test "compression produces binary and decompression restores dimensions" do
-    n = 100
-    {x, y} = CloudDelta.Benchmark.generate_dataset(n)
-
-    # Test compression produces binary
-    compressed = CloudDelta.compress({x, y})
-    assert is_binary(compressed)
-    assert byte_size(compressed) > 0
-
-    # Test decompression restores correct dimensions
-    {x_restored, y_restored} = CloudDelta.uncompress(compressed)
-    assert Nx.shape(x_restored) == Nx.shape(x)
-    assert Nx.shape(y_restored) == Nx.shape(y)
-    assert Nx.size(x_restored) == n
-    assert Nx.size(y_restored) == n
-
-    # Verify compression actually achieves reduction
-    # 4 bytes per float32
-    original_size = n * 2 * 4
-    compressed_size = byte_size(compressed)
-    compression_ratio = original_size / compressed_size
-
-    # Note: Binary compression may have negative ratio due to Huffman tree serialization overhead
-    # But the pipeline should work without crashing
-    # Should produce valid binary
-    assert compression_ratio > 0.0
+  test "lossless mode is bit-exact and works past the old 8-bit index limit" do
+    for n <- [1, 5, 64, 256, 300, 1_000] do
+      {x, y} = CloudDelta.Benchmark.generate_dataset(n, :random)
+      assert CloudDelta.check_compression({x, y})
+    end
   end
 
-  test "small dataset compression roundtrip" do
-    # Test with small dataset for easier debugging
-    n = 5
-    {x, y} = CloudDelta.Benchmark.generate_dataset(n)
+  test "quantized mode reconstructs within half a quantum" do
+    n = 1_000
+    bits = 16
+    {x, y} = CloudDelta.Benchmark.generate_dataset(n, :clustered)
+    bin = CloudDelta.compress({x, y}, mode: :quantized, bits: bits, preserve_order: true)
+    {xr, yr} = CloudDelta.uncompress(bin)
 
-    compressed = CloudDelta.compress({x, y})
-    {x_restored, y_restored} = CloudDelta.uncompress(compressed)
+    xmin = Nx.reduce_min(x) |> Nx.to_number()
+    xmax = Nx.reduce_max(x) |> Nx.to_number()
+    ymin = Nx.reduce_min(y) |> Nx.to_number()
+    ymax = Nx.reduce_max(y) |> Nx.to_number()
+    levels = Bitwise.bsl(1, bits) - 1
+    tol = max((xmax - xmin) / levels, (ymax - ymin) / levels) + 1.0e-5
 
-    # Verify current implementation behavior
-    assert Nx.size(x_restored) == n
-    assert Nx.size(y_restored) == n
-
-    # Verify we get real reconstructed values (not all identical)
-    # Values should be in reasonable ranges for synthetic data
-    x_list = Nx.to_flat_list(x_restored)
-    y_list = Nx.to_flat_list(y_restored)
-
-    # Verify we get real reconstructed values (broader ranges due to reconstruction variance)
-    assert Enum.all?(x_list, fn val -> val >= 0.0 and val <= 5.0 end)
-    assert Enum.all?(y_list, fn val -> val >= 0.0 and val <= 15.0 end)
+    Enum.zip([
+      Nx.to_flat_list(x),
+      Nx.to_flat_list(y),
+      Nx.to_flat_list(xr),
+      Nx.to_flat_list(yr)
+    ])
+    |> Enum.each(fn {x1, y1, x2, y2} ->
+      assert abs(x1 - x2) <= tol
+      assert abs(y1 - y2) <= tol
+    end)
   end
 
-  test "theoretical compression performance (like reference implementation)" do
-    # Test theoretical compression using same method as reference
-    n = 1000
-
-    {ratio, compression_percent, avg_bits, is_lossless} =
-      CloudDelta.Benchmark.verify_compression(n)
-
-    # Verify compression performance matches our benchmarks
-    # Should achieve at least 50% compression
-    assert compression_percent > 50.0
-    # Should be at least 2:1 ratio
-    assert ratio > 2.0
-    # Average bits per delta should be reasonable
-    assert avg_bits < 15.0
-    # Should be perfectly lossless
-    assert is_lossless == true
+  test "quantized binaries are smaller than packed float32 on structured clouds" do
+    {x, y} = CloudDelta.Benchmark.generate_dataset(2_000, :clustered)
+    stats = CloudDelta.stats({x, y}, mode: :quantized, bits: 16)
+    assert stats.compressed_bytes < stats.raw_bytes
+    assert stats.ratio > 1.5
   end
 
-  test "large dataset compression achieves target ratio" do
-    # Test that large datasets approach the 7.96:1 target
-    # Use 100k for faster testing (vs 1M)
-    n = 100_000
-
-    {ratio, compression_percent, _avg_bits, is_lossless} =
-      CloudDelta.Benchmark.verify_compression(n)
-
-    # Should approach target performance for large datasets
-    # Should achieve over 80% compression
-    assert compression_percent > 80.0
-    # Should be at least 5:1 ratio
-    assert ratio > 5.0
-    # Should be perfectly lossless
-    assert is_lossless == true
+  test "grid clouds compress far better than raw zlib of float32" do
+    {x, y} = CloudDelta.Benchmark.generate_dataset(2_500, :grid)
+    stats = CloudDelta.stats({x, y}, mode: :quantized, bits: 12)
+    assert stats.ratio > stats.zlib_ratio
+    assert stats.vs_zlib > 1.5
   end
 
-  test "check_compression function validates round-trip" do
-    # Test the public API check_compression function
-    n = 50
-    {x, y} = CloudDelta.Benchmark.generate_dataset(n)
+  test "preserve_order restores input sequence in lossless mode" do
+    points = [{0.1, 0.2}, {1.5, 3.3}, {0.1, 9.0}, {2.0, 0.0}]
+    bin = CloudDelta.compress(points, mode: :lossless, preserve_order: true)
+    restored = CloudDelta.uncompress_points(bin)
+    assert length(restored) == 4
 
-    # This tests the actual binary compress/uncompress pipeline
-    # Note: May not be lossless due to current Huffman decoding issues
-    result = CloudDelta.check_compression({x, y})
+    Enum.zip(points, restored)
+    |> Enum.each(fn {{x1, y1}, {x2, y2}} ->
+      assert_in_delta x1, x2, 1.0e-6
+      assert_in_delta y1, y2, 1.0e-6
+    end)
+  end
 
-    # Test completes without crashing (the reconstruction pipeline works)
-    assert is_boolean(result)
+  test "empty and singleton clouds round-trip" do
+    assert CloudDelta.uncompress_points(CloudDelta.compress([], mode: :lossless)) == []
+
+    bin = CloudDelta.compress([{1.25, -4.5}], mode: :lossless, preserve_order: true)
+    [{x, y}] = CloudDelta.uncompress_points(bin)
+    assert_in_delta x, 1.25, 1.0e-6
+    assert_in_delta y, -4.5, 1.0e-6
+  end
+
+  test "lossless mode beats zlib on clustered data" do
+    {x, y} = CloudDelta.Benchmark.generate_dataset(2_000, :clustered)
+    stats = CloudDelta.stats({x, y}, mode: :lossless)
+    assert stats.compressed_bytes < stats.zlib_bytes
+    assert stats.ratio > 1.0
+  end
+
+  test "stats compare against real byte counts, not theoretical bit sums" do
+    {x, y} = CloudDelta.Benchmark.generate_dataset(200, :linear)
+    stats = CloudDelta.stats({x, y}, mode: :quantized, bits: 16)
+    bin = CloudDelta.compress({x, y}, mode: :quantized, bits: 16)
+    assert stats.compressed_bytes == byte_size(bin)
+    assert stats.raw_bytes == 200 * 8
   end
 end
