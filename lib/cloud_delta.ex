@@ -1,48 +1,49 @@
 defmodule CloudDelta do
   @moduledoc """
-  Lossless and quantized compression for 2D point sets.
+  Point-set compression for 2D and 3D coordinates.
 
-  CloudDelta treats a point cloud as an unordered set of `(x, y)` pairs. It
-  reorders those pairs for spatial locality (Morton order), delta-encodes the
-  integer coordinates, and entropy-codes the residuals with zlib (DEFLATE).
-
-  The previous independent-axis sort plus “theoretical Huffman” numbers in
-  v0.1 were not a working compressor: they discarded pairing, under-counted
-  permutation bits, and never measured the bytes actually written. This
-  implementation measures real binaries and reconstructs either bit-exact
-  floats (`mode: :lossless`) or quantized coordinates (`mode: :quantized`).
+  CloudDelta treats a cloud as an unordered set of points. It reorders them
+  for spatial locality (Morton order), optionally quantizes, delta-encodes,
+  and entropy-codes residuals with zlib.
 
   ## Usage
 
-      {x, y} = CloudDelta.Benchmark.generate_dataset(10_000, :clustered)
       compressed = CloudDelta.compress({x, y}, mode: :quantized, bits: 16)
       {x2, y2} = CloudDelta.uncompress(compressed)
 
-      lossless = CloudDelta.compress({x, y}, mode: :lossless)
-      true = CloudDelta.check_compression({x, y})
+      compressed3 = CloudDelta.compress(xyz_tuples, mode: :quantized, bits: 12)
+      points = CloudDelta.uncompress_points(compressed3)
   """
 
   alias CloudDelta.Codec
 
-  @type points_tensor :: {Nx.Tensor.t(), Nx.Tensor.t()}
-  @type point_list :: [{number(), number()}]
+  @type point2 :: {number(), number()}
+  @type point3 :: {number(), number(), number()}
+  @type point :: point2() | point3()
+  @type points_tensor ::
+          {Nx.Tensor.t(), Nx.Tensor.t()} | {Nx.Tensor.t(), Nx.Tensor.t(), Nx.Tensor.t()}
+  @type point_list :: [point()]
   @type compress_opt ::
           {:mode, :quantized | :lossless}
           | {:bits, pos_integer()}
           | {:preserve_order, boolean()}
 
   @doc """
-  Compress a 2D point cloud.
+  Compress a 2D or 3D point cloud.
 
-  Accepts `{x, y}` Nx tensors or a list of `{x, y}` tuples.
+  Accepts `{x, y}` or `{x, y, z}` Nx tensors, or a list of `{x, y}` / `{x, y, z}` tuples.
 
   Options:
     * `:mode` — `:quantized` (default) or `:lossless`
-    * `:bits` — quantization bits per axis in quantized mode, 4..24 (default 16)
-    * `:preserve_order` — keep input order (default false; point-set semantics)
+    * `:bits` — quantization bits per axis, `4..24` (default `16`)
+    * `:preserve_order` — restore input order (default `false`)
   """
   @spec compress(points_tensor() | point_list(), [compress_opt()]) :: binary()
   def compress(points, opts \\ [])
+
+  def compress({x, y, z}, opts) do
+    Codec.encode(to_points(x, y, z), opts)
+  end
 
   def compress({x, y}, opts) do
     Codec.encode(to_points(x, y), opts)
@@ -53,21 +54,21 @@ defmodule CloudDelta do
   end
 
   @doc """
-  Decompress a CloudDelta binary to `{x, y}` float32 tensors.
+  Decompress to coordinate tensors: `{x, y}` or `{x, y, z}`.
   """
   @spec uncompress(binary()) :: points_tensor()
   def uncompress(binary) when is_binary(binary) do
-    {xs, ys} = Codec.decode(binary)
-    {Nx.tensor(xs, type: :f32), Nx.tensor(ys, type: :f32)}
+    {points, dims} = Codec.decode(binary)
+    unzip_tensors(points, dims)
   end
 
   @doc """
-  Decompress to a list of `{x, y}` floats.
+  Decompress to a list of `{x, y}` or `{x, y, z}` floats.
   """
   @spec uncompress_points(binary()) :: point_list()
   def uncompress_points(binary) when is_binary(binary) do
-    {xs, ys} = Codec.decode(binary)
-    Enum.zip(xs, ys)
+    {points, _dims} = Codec.decode(binary)
+    points
   end
 
   @doc """
@@ -80,9 +81,7 @@ defmodule CloudDelta do
 
     length(original) == length(restored) and
       Enum.zip(original, restored)
-      |> Enum.all?(fn {{x1, y1}, {x2, y2}} ->
-        eq32(x1, x2) and eq32(y1, y2)
-      end)
+      |> Enum.all?(fn {a, b} -> eq_point(a, b) end)
   end
 
   @doc """
@@ -92,7 +91,8 @@ defmodule CloudDelta do
   def stats(points, opts \\ []) do
     list = normalize_points(points)
     n = length(list)
-    raw_bytes = n * 8
+    dims = if n == 0, do: 2, else: tuple_size(hd(list))
+    raw_bytes = n * dims * 4
     packed = pack_f32(list)
     zlib_bytes = byte_size(:zlib.compress(packed))
     compressed = compress(list, opts)
@@ -100,6 +100,7 @@ defmodule CloudDelta do
 
     %{
       n: n,
+      dims: dims,
       raw_bytes: raw_bytes,
       zlib_bytes: zlib_bytes,
       compressed_bytes: compressed_bytes,
@@ -114,12 +115,49 @@ defmodule CloudDelta do
     Enum.zip(Nx.to_flat_list(x), Nx.to_flat_list(y))
   end
 
+  @doc false
+  def to_points(%Nx.Tensor{} = x, %Nx.Tensor{} = y, %Nx.Tensor{} = z) do
+    Enum.zip([Nx.to_flat_list(x), Nx.to_flat_list(y), Nx.to_flat_list(z)])
+  end
+
+  defp normalize_points({x, y, z}), do: to_points(x, y, z)
   defp normalize_points({x, y}), do: to_points(x, y)
   defp normalize_points(points) when is_list(points), do: points
 
+  defp unzip_tensors([], 3) do
+    empty = Nx.tensor([], type: :f32)
+    {empty, empty, empty}
+  end
+
+  defp unzip_tensors([], _dims) do
+    empty = Nx.tensor([], type: :f32)
+    {empty, empty}
+  end
+
+  defp unzip_tensors(points, 3) do
+    {xs, ys, zs} =
+      Enum.reduce(points, {[], [], []}, fn {x, y, z}, {xs, ys, zs} ->
+        {[x | xs], [y | ys], [z | zs]}
+      end)
+
+    {Nx.tensor(Enum.reverse(xs), type: :f32), Nx.tensor(Enum.reverse(ys), type: :f32),
+     Nx.tensor(Enum.reverse(zs), type: :f32)}
+  end
+
+  defp unzip_tensors(points, _dims) do
+    {xs, ys} =
+      Enum.reduce(points, {[], []}, fn {x, y}, {xs, ys} ->
+        {[x | xs], [y | ys]}
+      end)
+
+    {Nx.tensor(Enum.reverse(xs), type: :f32), Nx.tensor(Enum.reverse(ys), type: :f32)}
+  end
+
   defp pack_f32(points) do
-    for {x, y} <- points, into: <<>> do
-      <<f32(x)::float-32, f32(y)::float-32>>
+    for point <- points, into: <<>> do
+      Enum.reduce(Tuple.to_list(point), <<>>, fn v, acc ->
+        acc <> <<f32(v)::float-32>>
+      end)
     end
   end
 
@@ -127,6 +165,13 @@ defmodule CloudDelta do
 
   defp ratio(_num, 0), do: 0.0
   defp ratio(num, den), do: num / den
+
+  defp eq_point(a, b) when tuple_size(a) == tuple_size(b) do
+    Enum.zip(Tuple.to_list(a), Tuple.to_list(b))
+    |> Enum.all?(fn {x, y} -> eq32(x, y) end)
+  end
+
+  defp eq_point(_, _), do: false
 
   defp eq32(a, b) do
     <<ia::32>> = <<f32(a)::float-32>>

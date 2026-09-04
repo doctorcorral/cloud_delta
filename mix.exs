@@ -9,7 +9,7 @@ defmodule CloudDelta.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description:
-        "2D point-cloud compression: Morton reorder, optional quantization, delta encoding, zlib.",
+        "2D/3D point-cloud compression: Morton reorder, optional quantization, delta encoding, zlib.",
       source_url: "https://github.com/doctorcorral/cloud_delta/",
       package: [
         maintainers: ["Ricardo Corral-Corral"],

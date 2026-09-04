@@ -77,6 +77,56 @@ defmodule CloudDeltaTest do
     assert stats.ratio > 1.0
   end
 
+  test "3D lossless is bit-exact" do
+    points = CloudDelta.Benchmark.generate_points_3d(400, :clustered)
+    assert CloudDelta.check_compression(points)
+    stats = CloudDelta.stats(points, mode: :lossless)
+    assert stats.dims == 3
+    assert stats.raw_bytes == 400 * 12
+    assert stats.compressed_bytes < stats.raw_bytes
+  end
+
+  test "3D quantized reconstructs within a quantum" do
+    points = CloudDelta.Benchmark.generate_points_3d(300, :clustered)
+    bits = 12
+    bin = CloudDelta.compress(points, mode: :quantized, bits: bits, preserve_order: true)
+    restored = CloudDelta.uncompress_points(bin)
+    assert length(restored) == 300
+
+    xs = Enum.map(points, &elem(&1, 0))
+    ys = Enum.map(points, &elem(&1, 1))
+    zs = Enum.map(points, &elem(&1, 2))
+    levels = Bitwise.bsl(1, bits) - 1
+
+    tol =
+      max(
+        max(Enum.max(xs) - Enum.min(xs), Enum.max(ys) - Enum.min(ys)),
+        Enum.max(zs) - Enum.min(zs)
+      ) / levels + 1.0e-5
+
+    Enum.zip(points, restored)
+    |> Enum.each(fn {{x1, y1, z1}, {x2, y2, z2}} ->
+      assert abs(x1 - x2) <= tol
+      assert abs(y1 - y2) <= tol
+      assert abs(z1 - z2) <= tol
+    end)
+  end
+
+  test "loads a real Stanford range scan and compresses it" do
+    path = "priv/datasets/bunny/data/bun000.ply"
+
+    if File.exists?(path) do
+      points = CloudDelta.Ply.load(path)
+      assert length(points) == 40_256
+      {x, y, z} = hd(points)
+      assert is_float(x) and is_float(y) and is_float(z)
+
+      stats = CloudDelta.stats(points, mode: :quantized, bits: 12)
+      assert stats.dims == 3
+      assert stats.compressed_bytes < stats.raw_bytes
+    end
+  end
+
   test "stats compare against real byte counts, not theoretical bit sums" do
     {x, y} = CloudDelta.Benchmark.generate_dataset(200, :linear)
     stats = CloudDelta.stats({x, y}, mode: :quantized, bits: 16)

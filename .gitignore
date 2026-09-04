@@ -21,3 +21,6 @@ point_cloud_compression-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Downloaded benchmark clouds (Stanford PLYs, etc).
+/priv/datasets/

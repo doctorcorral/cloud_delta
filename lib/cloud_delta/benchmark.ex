@@ -60,6 +60,41 @@ defmodule CloudDelta.Benchmark do
     end
   end
 
+  @doc """
+  Generate a synthetic 3D point list (`{x, y, z}` tuples).
+  """
+  def generate_points_3d(n, pattern \\ :clustered) do
+    key = Nx.Random.key(7)
+
+    case pattern do
+      :clustered ->
+        k = 6
+        {cx, key} = Nx.Random.uniform(key, 0.0, 1.0, shape: {k})
+        {cy, key} = Nx.Random.uniform(key, 0.0, 1.0, shape: {k})
+        {cz, key} = Nx.Random.uniform(key, 0.0, 1.0, shape: {k})
+        {assign, key} = Nx.Random.uniform(key, 0.0, k * 1.0, shape: {n})
+        idx = Nx.as_type(Nx.clip(Nx.floor(assign), 0, k - 1), :s32)
+        {jx, key} = Nx.Random.normal(key, 0.0, 0.04, shape: {n})
+        {jy, key} = Nx.Random.normal(key, 0.0, 0.04, shape: {n})
+        {jz, _} = Nx.Random.normal(key, 0.0, 0.04, shape: {n})
+
+        CloudDelta.to_points(
+          Nx.add(Nx.take(cx, idx), jx),
+          Nx.add(Nx.take(cy, idx), jy),
+          Nx.add(Nx.take(cz, idx), jz)
+        )
+
+      :random ->
+        {x, key} = Nx.Random.uniform(key, 0.0, 1.0, shape: {n})
+        {y, key} = Nx.Random.uniform(key, 0.0, 1.0, shape: {n})
+        {z, _} = Nx.Random.uniform(key, 0.0, 1.0, shape: {n})
+        CloudDelta.to_points(x, y, z)
+
+      _ ->
+        raise ArgumentError, "Unknown 3D pattern #{inspect(pattern)}"
+    end
+  end
+
   defp clustered(n, key) do
     k = 5
     {centers_x, key} = Nx.Random.uniform(key, 0.2, 1.8, shape: {k})
