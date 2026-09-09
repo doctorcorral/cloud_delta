@@ -162,3 +162,7 @@ Hex `0.1.0` is **retired** (`invalid`). It advertised 7.99:1 lossless and
 Huffman lengths and one 8-bit permutation, never measured `compress/1`
 bytes, and independent X/Y sort breaks pairing. Actual binaries were larger
 than raw float32 and did not round-trip. Use **0.2.1**.
+
+## License
+
+MIT
